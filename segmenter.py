@@ -549,14 +549,17 @@ class DocumentSegmenterEngine:
         """
         Fungsi khusus pasca-ekstraksi untuk menggabungkan file region (.png) 
         menjadi satu kesatuan file per kolom berdasarkan analisis sekuensial koordinat Y.
-        Region berjenis 'Picture' akan diabaikan dari proses ini.
+        
+        Kondisi khusus:
+        - Jika hanya ada 1 region secara keseluruhan, loloskan langsung (termasuk Picture).
+        - Jika ada lebih dari 1 region, region berjenis 'Picture' akan diabaikan/di-filter.
         """
         regions_dir = Path(regions_dir)
         if not regions_dir.exists():
             print(f"❌ Folder regions tidak ditemukan: {regions_dir}")
             return
 
-        # 1. Ambil semua file txt secara urutan abjad ascending (sesuai urutan reading order graph)
+        # 1. Ambil semua file txt secara urutan abjad ascending
         txt_files = sorted(list(regions_dir.glob("region_*.txt")))
         if not txt_files:
             print("ℹ️ Tidak ditemukan file metadata region (.txt) untuk proses merge kolom.")
@@ -564,6 +567,13 @@ class DocumentSegmenterEngine:
 
         print(f"\n🔄 Menjalankan Logika Merging Sekuensial Kolom di: {regions_dir.name}")
         
+        # -----------------------------------------------------------------
+        # KONDISI KHUSUS: Hanya ada 1 region secara keseluruhan
+        # -----------------------------------------------------------------
+        bypass_single_region = (len(txt_files) == 1)
+        if bypass_single_region:
+            print("ℹ️ Hanya terdeteksi 1 region di dokumen ini. Melewati filter tipe (Bypass).")
+
         columns_data = []  # Menyimpan daftar list region per kelompok kolom
         current_column_regions = []
         prev_y_min = None
@@ -571,9 +581,9 @@ class DocumentSegmenterEngine:
         # 2 & 3. Berjalan sekuensial dan bandingkan koordinat Y untuk deteksi kolom
         for txt_path in txt_files:
             # -----------------------------------------------------------------
-            # FILTER: Abaikan region yang mengandung '_Picture_' di tengah nama filenya
+            # FILTER: Abaikan '_Picture_' HANYA JIKA total region lebih dari 1
             # -----------------------------------------------------------------
-            if "_Picture_" in txt_path.name:
+            if not bypass_single_region and "_Picture_" in txt_path.name:
                 continue
 
             # Cari file PNG pasangannya
@@ -599,7 +609,6 @@ class DocumentSegmenterEngine:
                 continue
 
             # Logika Penentuan Kelompok Kolom:
-            # Jika Y lebih kecil dari Y sebelumnya, dipastikan mata pembaca lompat ke atas (pindah kolom baru)
             if prev_y_min is not None and y_min < prev_y_min:
                 if current_column_regions:
                     columns_data.append(current_column_regions)
