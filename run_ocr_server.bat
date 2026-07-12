@@ -1,3 +1,6 @@
+@echo off
+REM Models from https://huggingface.co/wangjazz/LightOnOCR-2-1B-gguf
+
 set LLAMA_SERVER_EXE=C:\llama\llama-server.exe
 
 set MODEL_PATH=C:\llama\models\LightOnOCR-2-1B-f16.gguf
