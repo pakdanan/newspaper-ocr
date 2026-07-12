@@ -545,7 +545,7 @@ class DocumentSegmenterEngine:
         cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
         return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-def merge_extracted_regions_by_column(self, regions_dir):
+    def merge_extracted_regions_by_column(self, regions_dir):
         """
         Fungsi khusus pasca-ekstraksi untuk menggabungkan file region (.png) 
         menjadi satu kesatuan file per kolom berdasarkan analisis sekuensial koordinat Y.
