@@ -231,3 +231,5 @@ regions/
 
 # PDFs
 *.pdf
+
+*.txt
