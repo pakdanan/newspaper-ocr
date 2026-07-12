@@ -1,0 +1,14 @@
+# Core dependencies
+docling>=2.0.0
+docling-core>=2.0.0
+
+# Document processing
+pypdf>=4.0.0
+pdf2image>=1.16.0
+
+# Image processing (for region extraction)
+Pillow>=10.0.0
+opencv-python>=4.8.0
+
+# Optional but recommended
+tqdm>=4.66.0  # For progress bars
