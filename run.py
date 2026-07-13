@@ -1,30 +1,34 @@
 # run.py
+import pymupdf # sama dengan fitz
 import glob
 import os
 import argparse
+import shutil
+import time  # <-- Ditambahkan untuk kalkulasi durasi waktu file
 from pathlib import Path
+
+from pdf2image import convert_from_path
 from segmenter import DocumentSegmenterEngine
 from lighton_ocr_client import ocr_image, is_server_ready, ServerNotReadyError, OcrRequestError
 
 def main():
-    # Mengambil instance engine untuk mengekstrak data konfigurasi MODELS bawaan asli
     temp_engine = DocumentSegmenterEngine()
 
     parser = argparse.ArgumentParser(
-        description="Document Layout Analysis - Console Application",
+        description="Document Layout Analysis - Batch PDF Processing Application",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run.py document.jpg
-  python run.py document.jpg --model "Docling Layout Egret Large"
-  python run.py document.jpg --conf 0.5 --iou 0.4 --output results
-  python run.py document.jpg --nms "Custom IoMin"
+  python run.py --input-dir "./documents"
+  python run.py --input-dir "./documents" --output "./results" --model "Docling Layout Egret Large"
+  python run.py --input-dir "./documents" --no-segment  # Langsung OCR tanpa pemotongan wilayah
         """
     )
     
     parser.add_argument(
-        "image",
-        help="Path to the document image file"
+        "--input-dir",
+        required=True,
+        help="Path to the folder containing PDF files to process"
     )
     
     parser.add_argument(
@@ -66,10 +70,18 @@ Examples:
         action="store_true",
         help="List available models and exit"
     )
+
+    # Menambahkan argument boolean dengan default=True menggunakan BooleanOptionalAction
+    # Fitur ini menyediakan dua flag otomatis: --segment (default) dan --no-segment
+    parser.add_argument(
+        "--segment",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Menentukan apakah PDF dipotong per wilayah kolom (default: True). Gunakan --no-segment untuk langsung OCR file PDF asli."
+    )
     
     args = parser.parse_args()
     
-    # List models if requested
     if args.list_models:
         print("\n📋 Available Models:")
         print("-" * 50)
@@ -79,93 +91,173 @@ Examples:
             print(f"    Path: {model_path}")
         print()
         return
-    
-    # 1. Inisialisasi Engine Utama Pipeline
-    engine = DocumentSegmenterEngine(default_device='cpu')
 
-    # Print header
-    print("\n" + "=" * 70)
-    print("📄 DOCUMENT LAYOUT ANALYSIS - CONSOLE APP")
-    print("=" * 70)
-    print(f"Device: {engine.device}")
-    print(f"Image: {args.image}")
-    print(f"Model: {args.model}")
-    print(f"Parameters: Conf={args.conf}, IoU={args.iou}, NMS={args.nms}")
-    print("=" * 70 + "\n")
-    
-    # Process image via Engine Class
-    result = engine.process_image(
-        args.image,
-        args.model,
-        conf_threshold=args.conf,
-        iou_threshold=args.iou,
-        nms_method=args.nms
-    )
-    
-    if result is None:
-        print("\n❌ Processing failed or no detections found")
+    # Validasi folder input
+    input_path = Path(args.input_dir)
+    if not input_path.exists() or not input_path.is_dir():
+        print(f"❌ Folder input tidak ditemukan: {args.input_dir}")
         return
-    
-    # Save results with reading mode (Menghasilkan folder region_xxx_xxx)
-    regions_directory = engine.save_detection_results(result, args.output)
+
+    # Siapkan subfolder "done" di dalam folder input
+    done_dir = input_path / "done"
+    os.makedirs(done_dir, exist_ok=True)
+
+    # Siapkan folder output utama jika belum ada
+    os.makedirs(args.output, exist_ok=True)
+
+    # Siapkan subfolder khusus "ocr" di dalam folder output
+    ocr_output_dir = os.path.join(args.output, "ocr")
+    os.makedirs(ocr_output_dir, exist_ok=True)
 
     # =======================================================================
-    # PROSES JALAN PASCA-EKSTRAKSI: MERGING UTK PENGELOMPOKAN PER-KOLOM
+    # PROSES PEMBERSIHAN BERKALA (> EXPIRATION) DI AWAL PROSES
     # =======================================================================
-    merged_output_dir = None
-    if regions_directory and os.path.exists(regions_directory):
-        merged_output_dir = engine.merge_extracted_regions_by_column(regions_directory)
-    # =======================================================================    
+    if os.path.exists(args.output):
+        print(f"\n" + "-" * 70)
+        print(f"🧹 Memeriksa dan membersihkan file/subfolder lama (> waktu expiration) di: {args.output} ...")
+        
+        now = time.time()
+        expiration_in_seconds = 48 * 60 * 60  # 172800 detik
 
-    # =======================================================================
-    # INTEGRASI PROSES OCR JALAN KEDUA
-    # =======================================================================
-    if merged_output_dir and os.path.exists(merged_output_dir):
-        print("\n" + "-" * 50)
-        print("🔍 MEMULAI PROSES OCR DENGAN LIGHTON_OCR_CLIENT")
-        print("-" * 50)
-
-        # Cari segmen gambar hasil merge atau potongan kolom yang ada di dalam output folder
-        # Prioritaskan file hasil merge_by_column (biasanya berformat terstruktur atau berada di folder terkait)
-        # Menyesuaikan dengan output default segmenter, kita ambil file png yang valid
-        # Diurutkan (sorted) alphabetis agar pasti berjalan runtut: kolom_01.png, kolom_02.png, dst.
-        column_images = sorted(glob.glob(os.path.join(str(merged_output_dir), "kolom_*.png")))
-
-        if not column_images:
-            print("⚠️ Tidak ditemukan potongan gambar (.png) untuk di-OCR di folder hasil segmentasi.")
-        else:
-            print(f"📋 Menemukan {len(column_images)} potongan gambar untuk diproses.")
-            
-            combined_ocr_text = []
-            
-            for index, img_path in enumerate(column_images, 1):
-                filename = os.path.basename(img_path)
-                print(f"   [{index}/{len(column_images)}] Memproses {filename} ... ", end="", flush=True)
+        # Iterasi item yang ada langsung di dalam root output folder
+        for item in os.listdir(args.output):
+            # JANGAN UTAK-ATIK subfolder "ocr"
+            if item == "ocr":
+                continue
                 
+            item_path = os.path.join(args.output, item)
+            
+            try:
+                # Ambil waktu modifikasi terakhir dari file/folder tersebut
+                item_mtime = os.path.getmtime(item_path)
+                
+                # Cek apakah usianya lebih dari 1 hari
+                if (now - item_mtime) > expiration_in_seconds:
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        print(f"   🗑️ Menghapus subfolder usang: {item}")
+                    elif os.path.isfile(item_path):
+                        os.remove(item_path)
+                        print(f"   🗑️ Menghapus file usang: {item}")
+            except Exception as e:
+                print(f"   ⚠️ Gagal memeriksa/menghapus {item}: {e}")
+                
+        print("Base output folder siap.")
+
+    # Cari semua file PDF di folder input
+    pdf_files = sorted(list(input_path.glob("*.pdf")))
+
+    if not pdf_files:
+        print(f"✨ Tidak ada file *.pdf yang ditemukan di folder: {args.input_dir}")
+        return
+
+    print(f"📚 Menemukan {len(pdf_files)} file PDF untuk diproses.")
+
+    # 1. Inisialisasi Engine Utama Pipeline (Hanya jika proses segmentasi aktif)
+    engine = None
+    if args.segment:
+        engine = DocumentSegmenterEngine(default_device='cpu')
+
+    # =======================================================================
+    # ITERASI PEMROSESAN PDF SATU PER SATU
+    # =======================================================================
+    for file_idx, pdf_path in enumerate(pdf_files, 1):
+        print("\n" + "=" * 70)
+        print(f"🔄 [{file_idx}/{len(pdf_files)}] MEMPROSES FILE: {pdf_path.name}")
+        print("=" * 70)
+
+        combined_ocr_text = []
+
+        try:
+            if args.segment:
+                # -------------------------------------------------------------
+                # JALUR A: PROSES DENGAN SEGMENTASI REGION/KOLOM (DEFAULT)
+                # -------------------------------------------------------------
+                result = engine.process_image(
+                    str(pdf_path),
+                    args.model,
+                    conf_threshold=args.conf,
+                    iou_threshold=args.iou,
+                    nms_method=args.nms
+                )
+                
+                if result is None:
+                    print(f"❌ Gagal memproses {pdf_path.name}: Segmentasi gagal atau tidak ada deteksi.")
+                    continue
+                
+                # Simpan hasil segmentasi mentah ke folder output
+                regions_directory = engine.save_detection_results(result, args.output)
+
+                # Merge per kolom
+                merged_output_dir = None
+                if regions_directory and os.path.exists(regions_directory):
+                    merged_output_dir = engine.merge_extracted_regions_by_column(regions_directory)
+
+                # Jalankan proses OCR dari kolom yang berhasil di-merge
+                if merged_output_dir and os.path.exists(merged_output_dir):
+                    print("\n🔍 Memulai proses OCR untuk segmen kolom...")
+                    column_images = sorted(glob.glob(os.path.join(str(merged_output_dir), "kolom_*.png")))
+
+                    if not column_images:
+                        print("⚠️ Tidak ditemukan potongan gambar (kolom_*.png) untuk di-OCR.")
+                    else:
+                        print(f"📋 Menemukan {len(column_images)} potongan kolom untuk diproses.")
+                        for index, img_path in enumerate(column_images, 1):
+                            filename = os.path.basename(img_path)
+                            print(f"   [{index}/{len(column_images)}] OCR {filename} ... ", end="", flush=True)
+                            try:
+                                text_result = ocr_image(img_path)
+                                combined_ocr_text.append(f"{text_result}\n")
+                                print("✅ Sukses")
+                            except (ServerNotReadyError, OcrRequestError, FileNotFoundError) as e:
+                                print(f"❌ Gagal! Detail Error: {e}")
+                                combined_ocr_text.append(f"--- Bagian: {filename} (Gagal OCR) ---\n")
+            else:
+                # -------------------------------------------------------------
+                # JALUR B: langsung OCR FILE PDF UTUH (TANPA SEGMENTASI)
+                # -------------------------------------------------------------
+                print(f"🔍 [Direct Mode] Memulai proses direct OCR untuk file PDF asli...")
+                print(f"   Memproses {pdf_path.name} langsung ... ", end="", flush=True)
                 try:
-                    # Mengirim segmen gambar ke llama-server
+
+                    # Konversi pdf to image dengan asumsi pdf hanya berisi 1 halaman
+                    doc = pymupdf.open(str(pdf_path))
+                    pixmap = doc[0].get_pixmap(dpi=300)
+                    img_path = os.path.join(args.output, f"{pdf_path.stem}.png")
+                    pixmap.save(img_path)
+
                     text_result = ocr_image(img_path)
                     combined_ocr_text.append(f"{text_result}\n")
                     print("✅ Sukses")
                 except (ServerNotReadyError, OcrRequestError, FileNotFoundError) as e:
-                    print(f"❌ Gagal!\n   Detail Error: {e}")
-                    combined_ocr_text.append(f"--- Bagian: {filename} (Gagal OCR) ---\n")
-
-            # Menyimpan hasil gabungan OCR utuh ke dalam folder output utama
-            source_filename_stem = Path(args.image).stem
-            final_txt_name = f"{source_filename_stem}.txt"
-            final_output_path = os.path.join(args.output, final_txt_name)
+                    print(f"❌ Gagal! Detail Error: {e}")
+                    combined_ocr_text.append(f"--- File: {pdf_path.name} (Gagal Direct OCR) ---\n")
             
-            with open(final_output_path, "w", encoding="utf-8") as f_out:
-                f_out.write("\n".join(combined_ocr_text))
+            # -----------------------------------------------------------------
+            # SIMPAN HASIL OCR LANGSUNG KE DALAM SUBFOLDER "ocr" DI DALAM FOLDER OUTPUT
+            # -----------------------------------------------------------------
+            if combined_ocr_text:
+                final_txt_name = f"{pdf_path.stem}.txt"
+                final_output_path = os.path.join(ocr_output_dir, final_txt_name)
+                with open(final_output_path, "w", encoding="utf-8") as f_out:
+                    f_out.write("\n".join(combined_ocr_text))
+                print(f"\n📝 Hasil OCR gabungan disimpan di: {final_output_path}")
+
+            # -----------------------------------------------------------------
+            # PADA AKHIR TIAP FILE: PINDAHKAN PDF KE SUBFOLDER "DONE"
+            # -----------------------------------------------------------------
+            dest_path = done_dir / pdf_path.name
+            
+            if dest_path.exists():
+                os.remove(dest_path)
                 
-            print("-" * 50)
-            print(f"📝 Hasil OCR gabungan berhasil disimpan di: {final_output_path}")
+            shutil.move(str(pdf_path), str(dest_path))
+            print(f"🚚 File asli berhasil dipindahkan ke: {dest_path}")
 
+        except Exception as e:
+            print(f"❌ Gagal memproses file {pdf_path.name}. Detail Error: {e}")
 
-
-    print("\n✅ Processing complete!")
-    print(f"📁 Results saved to: {args.output}\n" + "=" * 70 + "\n")
+    print("\n✅ Semua file PDF di folder selesai diproses!")
 
 if __name__ == "__main__":
     main()

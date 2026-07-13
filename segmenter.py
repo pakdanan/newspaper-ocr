@@ -5,6 +5,7 @@ import torch
 import torchvision
 import numpy as np
 import cv2
+import fitz  # PyMuPDF
 from PIL import Image
 from transformers import (
     DFineForObjectDetection,
@@ -162,20 +163,14 @@ class DocumentSegmenterEngine:
             input_img = None
 
             if ext == ".pdf":
-                from pdf2image import convert_from_path
 
-                pages = convert_from_path(
-                    input_path,
-                    dpi=300,
-                    first_page=1,
-                    last_page=1
-                )
-
-                if not pages:
-                    print(f"❌ Error: Could not convert PDF: {input_path}")
-                    return
-
-                input_img = pages[0]
+                doc = fitz.open(input_path)
+                page = doc[0]  # halaman pertama (dan satu-satunya)
+                zoom = 300 / 72  # target 300 DPI
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+                input_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                doc.close()
 
             elif ext in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}:
                 input_img = Image.open(input_path).convert("RGB")
@@ -342,53 +337,6 @@ class DocumentSegmenterEngine:
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
         print(f"   Metadata saved: {json_path}")
-        
-        # 3. Save text summary
-        print(f"💾 Saving summary...")
-        summary_path = output_path / f"{base_name}_summary_{timestamp}.txt"
-        with open(summary_path, 'w', encoding='utf-8') as f:
-            f.write("=" * 70 + "\n")
-            f.write("DOCUMENT LAYOUT ANALYSIS RESULTS\n")
-            f.write("=" * 70 + "\n\n")
-            
-            f.write(f"Image: {input_path}\n")
-            f.write(f"Image Size: {result_data['image'].size}\n")
-            f.write(f"Model: {result_data['model_name']}\n")
-            f.write(f"Parameters: Conf={result_data['conf_threshold']}, IoU={result_data['iou_threshold']}, NMS={result_data['nms_method']}\n")
-            f.write(f"Total Detections: {len(detections)}\n")
-            f.write(f"Timestamp: {timestamp}\n\n")
-            
-            f.write("-" * 70 + "\n")
-            f.write("DETECTION DETAILS (by reading order)\n")
-            f.write("-" * 70 + "\n\n")
-            
-            # Group by type
-            type_counts = {}
-            for det in detections:
-                label_name = det['label_name']
-                type_counts[label_name] = type_counts.get(label_name, 0) + 1
-            
-            f.write("DETECTION SUMMARY BY TYPE:\n")
-            for label_name, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True):
-                f.write(f"  {label_name}: {count}\n")
-            f.write("\n")
-            
-            f.write("DETAILED DETECTIONS (sorted by position):\n")
-            f.write("-" * 70 + "\n")
-            
-            # Sort by y-position (top to bottom) for reading order
-            sorted_detections = sorted(
-                enumerate(detections),
-                key=lambda x: x[1]['box'][1]  # Sort by y_min
-            )
-            
-            for idx, (orig_idx, det) in enumerate(sorted_detections, 1):
-                box = det['box']
-                f.write(f"{idx:3d}. {det['label_name']:<20} ")
-                f.write(f"Conf: {det['confidence']:.3f}  ")
-                f.write(f"Box: [{box[0]:.0f}, {box[1]:.0f}, {box[2]:.0f}, {box[3]:.0f}]\n")
-        
-        print(f"   Summary saved: {summary_path}")
         
         # 4. Extract and save each region
         print(f"💾 Extracting regions using Graph-based Topological Sort (Human Reading Order)...")
