@@ -7,7 +7,6 @@ import shutil
 import time  # <-- Ditambahkan untuk kalkulasi durasi waktu file
 from pathlib import Path
 
-from pdf2image import convert_from_path
 from segmenter import DocumentSegmenterEngine
 from lighton_ocr_client import ocr_image, is_server_ready, ServerNotReadyError, OcrRequestError
 
@@ -225,6 +224,8 @@ Examples:
                     pixmap = doc[0].get_pixmap(dpi=300)
                     img_path = os.path.join(args.output, f"{pdf_path.stem}.png")
                     pixmap.save(img_path)
+                    doc.close()
+                    doc = None
 
                     text_result = ocr_image(img_path)
                     combined_ocr_text.append(f"{text_result}\n")
@@ -232,7 +233,10 @@ Examples:
                 except (ServerNotReadyError, OcrRequestError, FileNotFoundError) as e:
                     print(f"❌ Gagal! Detail Error: {e}")
                     combined_ocr_text.append(f"--- File: {pdf_path.name} (Gagal Direct OCR) ---\n")
-            
+                finally:
+                    if doc is not None:
+                        doc.close()
+
             # -----------------------------------------------------------------
             # SIMPAN HASIL OCR LANGSUNG KE DALAM SUBFOLDER "ocr" DI DALAM FOLDER OUTPUT
             # -----------------------------------------------------------------

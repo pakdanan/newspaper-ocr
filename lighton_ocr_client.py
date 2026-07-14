@@ -39,7 +39,7 @@ SERVER_PORT = os.environ.get("LIGHTON_OCR_PORT", "8081")
 SERVER_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/v1/chat/completions"
 HEALTH_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/health"
 
-DEFAULT_TIMEOUT = 240  # detik, sesuaikan kalau gambar besar / CPU lambat
+DEFAULT_TIMEOUT = 360  # detik, sesuaikan kalau gambar besar / CPU lambat
 
 # Parameter generasi default sesuai rekomendasi resmi LightOnOCR-2-1B
 DEFAULT_TEMPERATURE = 0.2
