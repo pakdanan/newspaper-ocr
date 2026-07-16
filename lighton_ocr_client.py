@@ -12,7 +12,7 @@ Contoh pemakaian:
 
     from lighton_ocr_client import ocr_image, ServerNotReadyError
 
-    text = ocr_image("koran.png")
+    text = ocr_image("image.png")
 """
 
 import base64
@@ -39,12 +39,10 @@ SERVER_PORT = os.environ.get("LIGHTON_OCR_PORT", "8081")
 SERVER_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/v1/chat/completions"
 HEALTH_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/health"
 
-DEFAULT_TIMEOUT = 360  # detik, sesuaikan kalau gambar besar / CPU lambat
+DEFAULT_TIMEOUT = 900  # detik, sesuaikan kalau gambar besar / CPU lambat
 
 # Parameter generasi default sesuai rekomendasi resmi LightOnOCR-2-1B
-DEFAULT_TEMPERATURE = 0.2
-DEFAULT_TOP_P = 0.9
-DEFAULT_TOP_K = 0
+DEFAULT_TEMPERATURE = 0.0
 DEFAULT_MAX_TOKENS = 2048  # disarankan tidak lebih dari ~1500
 
 
@@ -82,8 +80,6 @@ def _image_to_base64(image: Union[str, Image.Image]) -> str:
 def ocr_image(
     image: Union[str, Image.Image],
     temperature: float = DEFAULT_TEMPERATURE,
-    top_p: float = DEFAULT_TOP_P,
-    top_k: int = DEFAULT_TOP_K,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> str:
@@ -114,8 +110,6 @@ def ocr_image(
             }
         ],
         "temperature": temperature,
-        "top_p": top_p,
-        "top_k": top_k,
         "max_tokens": max_tokens,
     }
 

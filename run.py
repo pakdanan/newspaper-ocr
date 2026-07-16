@@ -97,16 +97,12 @@ Examples:
         print(f"❌ Folder input tidak ditemukan: {args.input_dir}")
         return
 
-    # Siapkan subfolder "done" di dalam folder input
-    done_dir = input_path / "done"
-    os.makedirs(done_dir, exist_ok=True)
-
     # Siapkan folder output utama jika belum ada
     os.makedirs(args.output, exist_ok=True)
 
     # Siapkan subfolder khusus "ocr" di dalam folder output
-    ocr_output_dir = os.path.join(args.output, "ocr")
-    os.makedirs(ocr_output_dir, exist_ok=True)
+    ocr_base_dir = os.path.join(args.output, "ocr")
+    os.makedirs(ocr_base_dir, exist_ok=True)
 
     # =======================================================================
     # PROSES PEMBERSIHAN BERKALA (> EXPIRATION) DI AWAL PROSES
@@ -143,8 +139,11 @@ Examples:
                 
         print("Base output folder siap.")
 
-    # Cari semua file PDF di folder input
-    pdf_files = sorted(list(input_path.glob("*.pdf")))
+    # Pencarian file *.pdf secara rekursif ke seluruh subfolder
+    pdf_files = sorted(list(input_path.rglob("*.pdf")))
+    
+    # Filter tambahan agar file yang sudah berhasil dipindahkan ke folder "done" tidak masuk antrean proses lagi
+    pdf_files = [f for f in pdf_files if "done" not in f.parts]
 
     if not pdf_files:
         print(f"✨ Tidak ada file *.pdf yang ditemukan di folder: {args.input_dir}")
@@ -162,10 +161,13 @@ Examples:
     # =======================================================================
     for file_idx, pdf_path in enumerate(pdf_files, 1):
         print("\n" + "=" * 70)
-        print(f"🔄 [{file_idx}/{len(pdf_files)}] MEMPROSES FILE: {pdf_path.name}")
+        # Mendapatkan file path relatif terhadap input_dir untuk log (contoh: 1966/01/10/thisfile.pdf)
+        relative_file_path = pdf_path.relative_to(input_path)
+        print(f"🔄 [{file_idx}/{len(pdf_files)}] MEMPROSES FILE: {relative_file_path}")
         print("=" * 70)
 
         combined_ocr_text = []
+        is_failed = False  # 🛠️ Tambahan: Penanda jika terjadi error/kegagalan proses OCR pada file ini
 
         try:
             if args.segment:
@@ -210,7 +212,8 @@ Examples:
                                 print("✅ Sukses")
                             except (ServerNotReadyError, OcrRequestError, FileNotFoundError) as e:
                                 print(f"❌ Gagal! Detail Error: {e}")
-                                combined_ocr_text.append(f"--- Bagian: {filename} (Gagal OCR) ---\n")
+                                is_failed = True  # 🛠️ Tandai sebagai gagal
+                                combined_ocr_text.append(f"{filename} ocr failed")
             else:
                 # -------------------------------------------------------------
                 # JALUR B: langsung OCR FILE PDF UTUH (TANPA SEGMENTASI)
@@ -232,25 +235,41 @@ Examples:
                     print("✅ Sukses")
                 except (ServerNotReadyError, OcrRequestError, FileNotFoundError) as e:
                     print(f"❌ Gagal! Detail Error: {e}")
-                    combined_ocr_text.append(f"--- File: {pdf_path.name} (Gagal Direct OCR) ---\n")
+                    is_failed = True  # 🛠️ Tandai sebagai gagal
+                    combined_ocr_text.append(f"{pdf_path.name} ocr failed")
                 finally:
                     if doc is not None:
                         doc.close()
 
             # -----------------------------------------------------------------
-            # SIMPAN HASIL OCR LANGSUNG KE DALAM SUBFOLDER "ocr" DI DALAM FOLDER OUTPUT
+            # REPLIKASI STRUKTUR FOLDER YANG SAMA PADA FOLDER OUTPUT OCR
             # -----------------------------------------------------------------
-            if combined_ocr_text:
+            if combined_ocr_text:	
                 final_txt_name = f"{pdf_path.stem}.txt"
-                final_output_path = os.path.join(ocr_output_dir, final_txt_name)
+                if is_failed:
+                    # Jika ada error, arahkan folder target ke subfolder 'err' di path relatif masing-masing
+                    ocr_target_dir = os.path.join(ocr_base_dir, relative_file_path.parent, "err")
+                    os.makedirs(ocr_target_dir, exist_ok=True)
+                    final_output_path = os.path.join(ocr_target_dir, final_txt_name)
+                    print(f"\n⚠️ Proses OCR bermasalah, disimpan di folder err: {final_output_path}")
+                else:
+                    # Jika sukses, taruh di struktur relative path biasa
+                    ocr_target_dir = os.path.join(ocr_base_dir, relative_file_path.parent)
+                    os.makedirs(ocr_target_dir, exist_ok=True)
+                    final_output_path = os.path.join(ocr_target_dir, final_txt_name)
+                    print(f"\n📝 Hasil OCR gabungan sukses disimpan di: {final_output_path}")
+                
                 with open(final_output_path, "w", encoding="utf-8") as f_out:
                     f_out.write("\n".join(combined_ocr_text))
-                print(f"\n📝 Hasil OCR gabungan disimpan di: {final_output_path}")
 
             # -----------------------------------------------------------------
-            # PADA AKHIR TIAP FILE: PINDAHKAN PDF KE SUBFOLDER "DONE"
+            # PEMINDAHAN DINAMIS PDF KE SUBFOLDER "done" DI LOKASI ASLINYA
             # -----------------------------------------------------------------
-            dest_path = done_dir / pdf_path.name
+            # Membuat subfolder 'done' sejajar di dalam folder tempat file itu berada saat ini
+            file_done_dir = pdf_path.parent / "done"
+            os.makedirs(file_done_dir, exist_ok=True)
+            
+            dest_path = file_done_dir / pdf_path.name
             
             if dest_path.exists():
                 os.remove(dest_path)
