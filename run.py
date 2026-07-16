@@ -167,7 +167,7 @@ Examples:
         print("=" * 70)
 
         combined_ocr_text = []
-        is_failed = False  # 🛠️ Tambahan: Penanda jika terjadi error/kegagalan proses OCR pada file ini
+        is_failed = False  # Penanda jika terjadi error/kegagalan proses OCR pada file ini
 
         try:
             if args.segment:
@@ -212,7 +212,7 @@ Examples:
                                 print("✅ Sukses")
                             except (ServerNotReadyError, OcrRequestError, FileNotFoundError) as e:
                                 print(f"❌ Gagal! Detail Error: {e}")
-                                is_failed = True  # 🛠️ Tandai sebagai gagal
+                                is_failed = True  # Tandai sebagai gagal
                                 combined_ocr_text.append(f"{filename} ocr failed")
             else:
                 # -------------------------------------------------------------
@@ -235,7 +235,7 @@ Examples:
                     print("✅ Sukses")
                 except (ServerNotReadyError, OcrRequestError, FileNotFoundError) as e:
                     print(f"❌ Gagal! Detail Error: {e}")
-                    is_failed = True  # 🛠️ Tandai sebagai gagal
+                    is_failed = True  # Tandai sebagai gagal
                     combined_ocr_text.append(f"{pdf_path.name} ocr failed")
                 finally:
                     if doc is not None:
@@ -263,10 +263,10 @@ Examples:
                     f_out.write("\n".join(combined_ocr_text))
 
             # -----------------------------------------------------------------
-            # PEMINDAHAN DINAMIS PDF KE SUBFOLDER "done" DI LOKASI ASLINYA
+            # 🛠️ PERBAIKAN: PEMINDAHAN DINAMIS PDF KE {input-dir}/done/{subfolder}
             # -----------------------------------------------------------------
-            # Membuat subfolder 'done' sejajar di dalam folder tempat file itu berada saat ini
-            file_done_dir = pdf_path.parent / "done"
+            # relative_file_path.parent mengambil struktur '1966/01/10'
+            file_done_dir = input_path / "done" / relative_file_path.parent
             os.makedirs(file_done_dir, exist_ok=True)
             
             dest_path = file_done_dir / pdf_path.name

@@ -12,3 +12,5 @@ opencv-python>=4.8.0
 
 # Optional but recommended
 tqdm>=4.66.0  # For progress bars
+
+mysql-connector-python
