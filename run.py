@@ -248,7 +248,7 @@ Examples:
                 final_txt_name = f"{pdf_path.stem}.txt"
                 if is_failed:
                     # Jika ada error, arahkan folder target ke subfolder 'err' di path relatif masing-masing
-                    ocr_target_dir = os.path.join(ocr_base_dir, relative_file_path.parent, "err")
+                    ocr_target_dir = os.path.join(ocr_base_dir, "err", relative_file_path.parent)
                     os.makedirs(ocr_target_dir, exist_ok=True)
                     final_output_path = os.path.join(ocr_target_dir, final_txt_name)
                     print(f"\n⚠️ Proses OCR bermasalah, disimpan di folder err: {final_output_path}")
