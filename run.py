@@ -112,7 +112,7 @@ Examples:
         print(f"🧹 Memeriksa dan membersihkan file/subfolder lama (> waktu expiration) di: {args.output} ...")
         
         now = time.time()
-        expiration_in_seconds = 48 * 60 * 60  # 172800 detik
+        expiration_in_seconds = 1 * 60 * 60 
 
         # Iterasi item yang ada langsung di dalam root output folder
         for item in os.listdir(args.output):
