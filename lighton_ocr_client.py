@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
 lighton_ocr_client.py
-Client tipis untuk memanggil LightOnOCR-2-1B yang dijalankan lewat llama-server
-(llama.cpp), bukan lewat transformers/PyTorch langsung.
+Client tipis untuk memanggil LightOnOCR-3-1B yang dijalankan lewat llama-server
+(llama.cpp) dalam mode plain transcription.
+Model GGUF: https://huggingface.co/richardyoung/LightOnOCR-3-1B-GGUF
 
-Prasyarat: llama-server sudah jalan di background (lihat run_server.bat / instruksi
-di bawah). Modul ini HANYA mengirim HTTP request ke server tsb — tidak ada model
+Prasyarat: llama-server sudah jalan di background (lihat run_ocr_server.bat).
+Modul ini HANYA mengirim HTTP request ke server tsb — tidak ada model
 yang dimuat di proses Python.
 
 Contoh pemakaian:
 
     from lighton_ocr_client import ocr_image, ServerNotReadyError
 
+    # Plain transcription OCR (markdown text)
     text = ocr_image("image.png")
 """
 
@@ -32,18 +34,19 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 # =====================================================================
-# Konfigurasi endpoint llama-server
+# Konfigurasi endpoint llama-server & model
 # =====================================================================
 SERVER_HOST = os.environ.get("LIGHTON_OCR_HOST", "127.0.0.1")
 SERVER_PORT = os.environ.get("LIGHTON_OCR_PORT", "8081")
 SERVER_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/v1/chat/completions"
 HEALTH_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/health"
+DEFAULT_MODEL = os.environ.get("LIGHTON_OCR_MODEL", "LightOnOCR-3-1B")
 
-DEFAULT_TIMEOUT = 900  # detik, sesuaikan kalau gambar besar / CPU lambat
+DEFAULT_TIMEOUT = 1200  # detik, sesuaikan kalau gambar besar / CPU lambat
 
-# Parameter generasi default sesuai rekomendasi resmi LightOnOCR-2-1B
+# Parameter generasi default sesuai rekomendasi LightOnOCR-3
 DEFAULT_TEMPERATURE = 0.0
-DEFAULT_MAX_TOKENS = 2048  # disarankan tidak lebih dari ~1500
+DEFAULT_MAX_TOKENS = 4096
 
 
 class ServerNotReadyError(RuntimeError):
@@ -79,16 +82,22 @@ def _image_to_base64(image: Union[str, Image.Image]) -> str:
 
 def ocr_image(
     image: Union[str, Image.Image],
+    model: str = DEFAULT_MODEL,
     temperature: float = DEFAULT_TEMPERATURE,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> str:
     """
-    Kirim satu gambar ke llama-server (LightOnOCR-2-1B) dan kembalikan teks hasil OCR.
+    Kirim satu gambar ke llama-server (LightOnOCR-3-1B) untuk plain transcription.
+
+    Pada LightOnOCR-3, plain transcription mode dihasilkan saat gambar dikirim
+    tanpa prompt teks tambahan, menghasilkan teks markdown dengan alur baca alami.
 
     Args:
         image: path ke file gambar, atau objek PIL.Image.
-        temperature, top_p, top_k, max_tokens: parameter generasi.
+        model: nama identifier model (default: "LightOnOCR-3-1B").
+        temperature: parameter temperature generasi (default: 0.0).
+        max_tokens: batas token output maksimum (default: 4096).
         timeout: batas waktu tunggu response (detik).
 
     Raises:
@@ -97,7 +106,7 @@ def ocr_image(
     image_b64 = _image_to_base64(image)
 
     payload = {
-        "model": "LightOnOCR-2-1B",
+        "model": model,
         "messages": [
             {
                 "role": "user",
@@ -105,7 +114,11 @@ def ocr_image(
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:image/png;base64,{image_b64}"},
-                    }
+                    },
+                    {
+                        "type": "text",
+                        "text": "",
+                    },
                 ],
             }
         ],
@@ -145,7 +158,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if not is_server_ready():
-        print(f"❌ llama-server belum siap di {SERVER_URL}. Jalankan run_server.bat dulu.")
+        print(f"❌ llama-server belum siap di {SERVER_URL}. Jalankan run_ocr_server.bat dulu.")
         sys.exit(1)
 
     target = sys.argv[1]
